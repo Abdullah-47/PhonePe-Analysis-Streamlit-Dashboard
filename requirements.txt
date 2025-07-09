@@ -1,0 +1,8 @@
+os
+json
+mysql.connector
+pandas
+plotly
+pymysql
+sqlalchemy
+streamlit
