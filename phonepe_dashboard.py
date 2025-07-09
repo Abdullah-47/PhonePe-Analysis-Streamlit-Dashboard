@@ -4,18 +4,23 @@ from sqlalchemy import create_engine, text
 import plotly.express as px
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
-import numpy as np
 
-# SQLAlchemy database connection
+# SQLAlchemy database connection using Streamlit secrets
 def get_engine():
     try:
-        engine = create_engine("mysql+pymysql://root:your-password@localhost/db-name")
+        # Get database credentials from Streamlit secrets
+        db_config = st.secrets["mysql"]
+        connection_string = (
+            f"mysql+pymysql://{db_config['username']}:{db_config['password']}"
+            f"@{db_config['host']}:{db_config['port']}/{db_config['database']}"
+        )
+        engine = create_engine(connection_string)
         return engine
     except Exception as e:
-        st.error(f"Database connection failed: {e}")
+        st.error(f"Database connection failed: {str(e)}")
         return None
 
-# Test function using SQLAlchemy
+# Test database connection
 def test_db():
     engine = get_engine()
     if not engine:
@@ -27,7 +32,7 @@ def test_db():
             row = result.fetchone()
             st.sidebar.success(f"Database test successful! Result: {row}")
     except Exception as e:
-        st.sidebar.error(f"Database test failed: {e}")
+        st.sidebar.error(f"Database test failed: {str(e)}")
     finally:
         if engine:
             engine.dispose()
@@ -40,13 +45,13 @@ def scenario_1():
         return
         
     try:
-        # Dynamic year selection
+        # Year selection
         with engine.connect() as conn:
             years = pd.read_sql("SELECT DISTINCT year FROM aggregated_transaction ORDER BY year", conn)['year'].tolist()
         selected_year = st.selectbox("Select Year", years, index=len(years)-1)
         
         with st.spinner("Loading transaction data..."):
-            # Optimized query 1: Category trends
+            # Query for category trends
             category_query = text(f"""
                 SELECT quarter, category, 
                        SUM(count) as total_count, 
@@ -54,10 +59,9 @@ def scenario_1():
                 FROM aggregated_transaction
                 WHERE year = {selected_year}
                 GROUP BY quarter, category
-                ORDER BY quarter, total_amount DESC
             """)
             
-            # Optimized query 2: State-level trends
+            # Query for state-level trends
             state_query = text(f"""
                 SELECT quarter, name AS state, 
                        SUM(count) as total_count, 
@@ -65,14 +69,13 @@ def scenario_1():
                 FROM map_transaction_hover
                 WHERE year = {selected_year}
                 GROUP BY quarter, name
-                ORDER BY quarter, total_amount DESC
             """)
             
             with engine.connect() as conn:
                 category_df = pd.read_sql(category_query, conn)
                 state_df = pd.read_sql(state_query, conn)
                 
-            # Display metrics
+            # Metrics
             col1, col2, col3 = st.columns(3)
             col1.metric("Total Transactions", f"{category_df['total_count'].sum():,}")
             col2.metric("Total Amount", f"₹{category_df['total_amount'].sum():,.2f}")
@@ -81,13 +84,12 @@ def scenario_1():
             # Category distribution
             st.subheader(f"Transaction Distribution by Category ({selected_year})")
             if not category_df.empty:
-                fig = px.sunburst(
-                    category_df,
-                    path=['category'],
+                fig = px.pie(
+                    category_df.groupby('category')['total_amount'].sum().reset_index(),
+                    names='category',
                     values='total_amount',
-                    color='total_count',
-                    color_continuous_scale='Blues',
-                    labels={'total_amount': 'Amount (₹)', 'total_count': 'Transactions'},
+                    hole=0.4,
+                    color_discrete_sequence=px.colors.qualitative.Pastel,
                     title='Transaction Value by Category'
                 )
                 st.plotly_chart(fig, use_container_width=True)
@@ -95,7 +97,6 @@ def scenario_1():
             # State performance
             st.subheader(f"State Performance by Quarter ({selected_year})")
             if not state_df.empty:
-                # Get top 10 states
                 top_states = state_df.groupby('state')['total_amount'].sum().nlargest(10).index
                 filtered_df = state_df[state_df['state'].isin(top_states)]
                 
@@ -123,11 +124,8 @@ def scenario_1():
                     title='Transaction Growth by Category'
                 )
                 st.plotly_chart(fig, use_container_width=True)
-            
+                
             st.success("Transaction behavior analysis completed!")
-            with st.expander("View Raw Insurance Data (State and Category)"):
-                st.dataframe(state_df)
-                st.dataframe(category_df)
             
     except Exception as e:
         st.error(f"Error in Scenario 1: {str(e)}")
@@ -152,7 +150,7 @@ def scenario_2():
             value=(min(years), max(years)))
         
         with st.spinner("Loading insurance data..."):
-            # Optimized query 1: Insurance growth
+            # Insurance growth query
             growth_query = text(f"""
                 SELECT year, quarter, 
                        SUM(count) as total_policies, 
@@ -163,22 +161,21 @@ def scenario_2():
                 ORDER BY year, quarter
             """)
             
-            # Optimized query 2: State-level opportunities
+            # State-level opportunities query
             state_query = text(f"""
-                SELECT year, name AS state, 
+                SELECT name AS state, 
                        SUM(count) as total_policies, 
                        SUM(amount) as total_premium
                 FROM map_insurance_hover
                 WHERE year BETWEEN {start_year} AND {end_year}
-                GROUP BY year, name
-                ORDER BY total_policies DESC
+                GROUP BY name
             """)
             
             with engine.connect() as conn:
                 growth_df = pd.read_sql(growth_query, conn)
                 state_df = pd.read_sql(state_query, conn)
                 
-            # Display metrics
+            # Metrics
             col1, col2, col3 = st.columns(3)
             col1.metric("Total Policies", f"{growth_df['total_policies'].sum():,}")
             col2.metric("Total Premium", f"₹{growth_df['total_premium'].sum():,.2f}")
@@ -226,11 +223,9 @@ def scenario_2():
             # State opportunities
             st.subheader("State-Level Opportunities")
             if not state_df.empty:
-                # Top states
-                top_states = state_df.groupby('state')['total_policies'].sum().nlargest(10).reset_index()
-                
-                # Opportunity states (high growth potential)
-                growth_potential = state_df.groupby('state')['total_policies'].sum().nsmallest(10).reset_index()
+                # Top states and opportunity states
+                top_states = state_df.nlargest(10, 'total_policies')
+                opportunity_states = state_df.nsmallest(10, 'total_policies')
                 
                 fig = make_subplots(rows=1, cols=2, subplot_titles=('Top States by Policies', 'High Opportunity States'))
                 
@@ -247,8 +242,8 @@ def scenario_2():
                 
                 fig.add_trace(
                     go.Bar(
-                        x=growth_potential['total_policies'],
-                        y=growth_potential['state'],
+                        x=opportunity_states['total_policies'],
+                        y=opportunity_states['state'],
                         orientation='h',
                         marker_color='#ff7f0e',
                         name='Policies'
@@ -263,10 +258,8 @@ def scenario_2():
                 )
                 
                 st.plotly_chart(fig, use_container_width=True)
+                
             st.success("Insurance growth analysis completed!")
-            with st.expander("View Raw Insurance Analysis Data"):
-                st.dataframe(growth_df)
-                st.dataframe(state_df)
             
     except Exception as e:
         st.error(f"Error in Scenario 2: {str(e)}")
@@ -282,7 +275,7 @@ def scenario_3():
         return
         
     try:
-        # Dynamic filters
+        # Filters
         with engine.connect() as conn:
             years = pd.read_sql("SELECT DISTINCT year FROM aggregated_transaction ORDER BY year", conn)['year'].tolist()
             categories = pd.read_sql("SELECT DISTINCT category FROM aggregated_transaction", conn)['category'].tolist()
@@ -292,7 +285,7 @@ def scenario_3():
         selected_categories = col2.multiselect("Select Categories", categories, default=categories, key='sc3_cat')
         
         with st.spinner("Loading transaction trend data..."):
-            # Optimized query 1: Category trends
+            # Category trends query
             category_query = text(f"""
                 SELECT quarter, category, 
                        SUM(count) as total_count, 
@@ -301,10 +294,9 @@ def scenario_3():
                 WHERE year = {selected_year}
                 {'AND category IN (' + ','.join([f"'{cat}'" for cat in selected_categories]) + ')' if selected_categories else ''}
                 GROUP BY quarter, category
-                ORDER BY quarter
             """)
             
-            # Optimized query 2: Regional trends
+            # Regional trends query
             region_query = text(f"""
                 SELECT quarter, name AS region, 
                        SUM(count) as total_count, 
@@ -312,14 +304,13 @@ def scenario_3():
                 FROM map_transaction_hover
                 WHERE year = {selected_year}
                 GROUP BY quarter, name
-                ORDER BY quarter, total_amount DESC
             """)
             
             with engine.connect() as conn:
                 category_df = pd.read_sql(category_query, conn)
                 region_df = pd.read_sql(region_query, conn)
                 
-            # Display metrics
+            # Metrics
             col1, col2, col3 = st.columns(3)
             col1.metric("Total Transactions", f"{category_df['total_count'].sum():,}")
             col2.metric("Total Amount", f"₹{category_df['total_amount'].sum():,.2f}")
@@ -360,7 +351,6 @@ def scenario_3():
             # Expansion opportunities
             st.subheader("Expansion Opportunity Analysis")
             if not region_df.empty:
-                # Calculate growth rates
                 region_growth = region_df.groupby('region')['total_amount'].sum().reset_index()
                 region_growth['growth_potential'] = region_growth['total_amount'].rank(pct=True)
                 
@@ -375,15 +365,9 @@ def scenario_3():
                     labels={'total_amount': 'Total Amount (₹)', 'growth_potential': 'Growth Potential'},
                     title='Region Growth Potential Analysis'
                 )
-                fig.update_layout(
-                    yaxis=dict(tickformat=".0%"),
-                    height=500
-                )
                 st.plotly_chart(fig, use_container_width=True)
+                
             st.success("Transaction trend analysis completed!")
-            with st.expander("View Raw Transaction Trend Data"):
-                st.dataframe(category_df)
-                st.dataframe(region_df)                
             
     except Exception as e:
         st.error(f"Error in Scenario 3: {str(e)}")
@@ -403,14 +387,14 @@ def scenario_4():
         entity_level = st.radio("Select Entity Level", ['state', 'district', 'pincode'], index=0, horizontal=True)
         
         with st.spinner("Loading top location data..."):
-            # Optimized query
+            # Top locations query
             query = text(f"""
-                SELECT year, quarter, entity_name, 
+                SELECT entity_name, 
                        SUM(count) as total_count, 
                        SUM(amount) as total_amount
                 FROM top_transaction
                 WHERE entity_level = '{entity_level}'
-                GROUP BY year, quarter, entity_name
+                GROUP BY entity_name
                 ORDER BY total_amount DESC
                 LIMIT 20
             """)
@@ -418,7 +402,7 @@ def scenario_4():
             with engine.connect() as conn:
                 df = pd.read_sql(query, conn)
                 
-            # Display metrics
+            # Metrics
             col1, col2 = st.columns(2)
             col1.metric("Total Transactions", f"{df['total_count'].sum():,}")
             col2.metric("Total Amount", f"₹{df['total_amount'].sum():,.2f}")
@@ -426,12 +410,10 @@ def scenario_4():
             # Top locations
             st.subheader(f"Top 20 {entity_level.capitalize()}s by Transaction Amount")
             if not df.empty:
-                # Aggregate across quarters
-                agg_df = df.groupby('entity_name')[['total_count', 'total_amount']].sum().reset_index()
-                agg_df = agg_df.sort_values('total_amount', ascending=False)
+                df = df.sort_values('total_amount', ascending=False)
                 
                 fig = px.bar(
-                    agg_df,
+                    df,
                     x='entity_name',
                     y='total_amount',
                     color='total_amount',
@@ -440,20 +422,6 @@ def scenario_4():
                     title=f'Top {entity_level.capitalize()}s by Transaction Value'
                 )
                 fig.update_layout(xaxis=dict(tickangle=45))
-                st.plotly_chart(fig, use_container_width=True)
-            
-            # Quarterly trends
-            st.subheader(f"Quarterly Performance Trends")
-            if not df.empty and 'quarter' in df.columns:
-                fig = px.line(
-                    df,
-                    x='quarter',
-                    y='total_amount',
-                    color='entity_name',
-                    markers=True,
-                    labels={'total_amount': 'Amount (₹)', 'quarter': 'Quarter'},
-                    title='Quarterly Transaction Trends for Top Locations'
-                )
                 st.plotly_chart(fig, use_container_width=True)
             
             # Performance distribution
@@ -467,9 +435,8 @@ def scenario_4():
                     title='Transaction Amount Distribution'
                 )
                 st.plotly_chart(fig, use_container_width=True)
+                
             st.success("Top location analysis completed!")
-            with st.expander("View Raw Top Performing Locations Data"):
-                st.dataframe(df)
             
     except Exception as e:
         st.error(f"Error in Scenario 4: {str(e)}")
@@ -486,17 +453,17 @@ def scenario_5():
         
     try:
         # Year-quarter selection
-        year_quarters = text(f"""
-                SELECT DISTINCT CONCAT(year, ' Q', quarter) AS yq 
-                FROM top_user
-            """)
         with engine.connect() as conn:
-            year_quarters = pd.read_sql(year_quarters, conn)['yq'].tolist()
+            year_quarters = pd.read_sql("""
+                SELECT DISTINCT CONCAT(year, ' Q', quarter) AS yq 
+                FROM top_user 
+            """, conn)['yq'].tolist()
+        
         selected_yq = st.selectbox("Select Year-Quarter", year_quarters, index=0)
         year, quarter = selected_yq.split(' Q')
         
         with st.spinner("Loading user registration data..."):
-            # Optimized query
+            # Registration locations query
             query = text(f"""
                 SELECT entity_level, entity_name, 
                        SUM(registered_users) as total_users
@@ -510,7 +477,7 @@ def scenario_5():
             with engine.connect() as conn:
                 df = pd.read_sql(query, conn)
                 
-            # Display metrics
+            # Metrics
             col1, col2 = st.columns(2)
             col1.metric("Total Registered Users", f"{df['total_users'].sum():,}")
             col2.metric("Locations Covered", df['entity_name'].nunique())
@@ -543,40 +510,8 @@ def scenario_5():
                     title='User Registration Distribution'
                 )
                 st.plotly_chart(fig, use_container_width=True)
-            
-            # Growth trends
-            st.subheader("Growth Trends")
-            if not df.empty:
-                # Get historical data for top locations
-                top_locations = df['entity_name'].head(5).tolist()
-                history_query = text(f"""
-                    SELECT year, quarter, entity_name, 
-                           SUM(registered_users) as total_users
-                    FROM top_user
-                    WHERE entity_name IN ({','.join([f"'{loc}'" for loc in top_locations])})
-                    GROUP BY year, quarter, entity_name
-                    ORDER BY year, quarter
-                """)
                 
-                with engine.connect() as conn:
-                    history_df = pd.read_sql(history_query, conn)
-                
-                if not history_df.empty:
-                    history_df['period'] = history_df['year'].astype(str) + ' Q' + history_df['quarter'].astype(str)
-                    
-                    fig = px.line(
-                        history_df,
-                        x='period',
-                        y='total_users',
-                        color='entity_name',
-                        markers=True,
-                        labels={'total_users': 'Registered Users', 'period': 'Quarter'},
-                        title='Growth Trends for Top Locations'
-                    )
-                    st.plotly_chart(fig, use_container_width=True)
             st.success("User registration analysis completed!")
-            with st.expander("View Raw Top User Registration Data"):
-                st.dataframe(df)
             
     except Exception as e:
         st.error(f"Error in Scenario 5: {str(e)}")
@@ -615,15 +550,15 @@ with st.sidebar:
     
     st.divider()
     
-    st.header("Troubleshooting")
-    if st.checkbox("Show Debug Information"):
-        st.subheader("Environment Information")
-        st.write(f"Streamlit version: {st.__version__}")
-        st.write(f"Pandas version: {pd.__version__}")
-        st.write(f"Plotly version: {pd.__version__}")
-        
+    st.header("About")
+    st.info("""
+        This dashboard provides insights into PhonePe's transaction patterns, 
+        insurance growth, user registrations, and top-performing locations.
+        Data is sourced from PhonePe's internal databases.
+    """)
+    
     st.divider()
-    st.caption("PhonePe Data Analysis | v1.0 | 2025")
+    st.caption("PhonePe Data Analysis | v1.0 | 2023")
 
 # Execute selected scenario
 if scenario == "Scenario 1":
