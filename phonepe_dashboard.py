@@ -79,7 +79,7 @@ def scenario_1():
             col1, col2, col3 = st.columns(3)
             col1.metric("Total Transactions", f"{category_df['total_count'].sum():,}")
             col2.metric("Total Amount", f"₹{category_df['total_amount'].sum():,.2f}")
-            col3.metric("States Covered", state_df['state'].nunique())
+            col3.metric("Regions Covered (States & Districts)", state_df['state'].nunique())
             
             # Category distribution
             st.subheader(f"Transaction Distribution by Category ({selected_year})")
@@ -179,7 +179,7 @@ def scenario_2():
             col1, col2, col3 = st.columns(3)
             col1.metric("Total Policies", f"{growth_df['total_policies'].sum():,}")
             col2.metric("Total Premium", f"₹{growth_df['total_premium'].sum():,.2f}")
-            col3.metric("States Covered", state_df['state'].nunique())
+            col3.metric("Regions Covered (States & Districts)", state_df['state'].nunique())
             
             # Growth trends
             st.subheader(f"Insurance Growth ({start_year}-{end_year})")

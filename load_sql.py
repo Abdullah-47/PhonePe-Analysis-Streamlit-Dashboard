@@ -3,10 +3,11 @@ import json
 import mysql.connector
 
 conn = mysql.connector.connect(
-    host='localhost',
-    user='root',
-    password='your-password', # Replace with your MySQL password
-    database='db-name'  # Replace with your database name
+    host='localhost',  # Replace with your MySQL host
+    user='username',  # Replace with your MySQL username
+    port=0000,  # Replace with your MySQL port
+    password='your_pass', # Replace with your MySQL password
+    database='your_db'  # Replace with your database name
 )
 cursor = conn.cursor()
 
