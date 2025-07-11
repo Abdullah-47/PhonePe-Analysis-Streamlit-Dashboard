@@ -558,7 +558,7 @@ with st.sidebar:
     """)
     
     st.divider()
-    st.caption("PhonePe Data Analysis | v1.0 | 2023")
+    st.caption("PhonePe Data Analysis | v1.0 | 2025")
 
 # Execute selected scenario
 if scenario == "Scenario 1":
